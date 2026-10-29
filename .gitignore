@@ -1,0 +1,7 @@
+bdavenv/
+__pycache__/
+.pytest_cache/
+data/processed/
+data/recommendations/
+output/
+*.pyc
