@@ -1,6 +1,66 @@
 # SmartReco
 
-SmartReco is a local Apache Spark prototype for product recommendations using the UCI Online Retail workbook. It cleans purchase transactions, creates implicit customer-product strengths (`log1p(total positive quantity)`), trains Spark MLlib implicit ALS, evaluates future interactions, computes a popularity fallback, and calculates product co-purchase associations.
+## What the project is
+
+SmartReco is a local batch analytics and recommendation application for the
+UCI Online Retail dataset. It turns historical invoices into customer-product
+interactions, learns implicit product preferences with Apache Spark MLlib ALS,
+and presents the results in a Streamlit dashboard.
+
+The project is intended as a Big Data Analytics prototype and teaching/demo
+application, not as a production recommender service. It runs the complete
+workflow locally, persists intermediate results as Parquet and JSON, and
+serves those persisted results without retraining when the dashboard opens.
+
+The application provides:
+
+- Data cleaning and data-quality reporting for retail transactions
+- Customer-product interaction strengths based on positive purchase quantity
+- Implicit ALS recommendations and a popularity fallback
+- Precision@K and Recall@K evaluation using a per-customer temporal holdout
+- Product co-purchase associations with support, confidence, and lift
+- Streamlit views for overview metrics, product analytics, recommendations,
+  evaluation, and associations
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A[Online Retail.xlsx] --> B[Data loader\nopenpyxl + Spark schema]
+    B --> C[Data cleaning\nvalidation, returns, duplicates]
+    C --> D[Purchase data]
+    D --> E[Interaction builder\ncustomer-product aggregation]
+    E --> F[Stable integer IDs]
+    F --> G[Per-customer temporal split]
+    G --> H[Implicit ALS]
+    H --> I[Top-k recommendations]
+    I --> J[Remove purchased items\nand re-rank]
+    J --> K[Recommendation Parquet]
+    G --> L[Precision@K / Recall@K]
+    D --> M[Product associations]
+    D --> N[Summary and quality metrics]
+    K --> O[Streamlit dashboard]
+    L --> P[Evaluation JSON]
+    M --> O
+    N --> O
+```
+
+### Component responsibilities
+
+| Component | Responsibility |
+|---|---|
+| `src/data_loader.py` | Reads the Excel workbook with `openpyxl` and creates a typed Spark DataFrame. |
+| `src/data_cleaning.py` | Validates fields, removes invalid purchases, cancellations, returns, and duplicate rows. |
+| `src/feature_engineering.py` | Aggregates purchases by customer and product, calculates interaction strength, and assigns stable IDs. |
+| `src/evaluation.py` | Creates the latest-item-per-customer holdout and calculates ranking metrics. |
+| `src/recommendation_model.py` | Trains implicit ALS, creates recommendations, removes purchased products, and re-ranks results. |
+| `src/association_rules.py` | Calculates product co-purchase associations. |
+| `src/pipeline.py` | Orchestrates the batch workflow and writes generated outputs. |
+| `app.py` | Reads persisted outputs and displays the Streamlit dashboard. |
+
+The main entry point is `main.py`. It creates a Spark session and calls the
+pipeline. The dashboard in `app.py` is a read-only presentation layer: it
+does not retrain ALS.
 
 ## Dataset and schema
 
