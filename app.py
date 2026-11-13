@@ -13,6 +13,24 @@ st.set_page_config(page_title="SmartReco", layout="wide")
 st.title("SmartReco: E-Commerce Recommendations")
 evaluation = OUTPUT / "evaluation.json"
 summary = OUTPUT / "summary.json"
+generated_parquet_dirs = (
+    PROCESSED / "cleaned_purchases",
+    PROCESSED / "interactions",
+    RECS,
+    PROCESSED / "product_associations",
+)
+
+
+def generated_outputs_ready() -> bool:
+    return (
+        evaluation.exists()
+        and summary.exists()
+        and (OUTPUT / "data_quality.json").exists()
+        and all(
+            folder.is_dir() and any(folder.glob("*.parquet"))
+            for folder in generated_parquet_dirs
+        )
+    )
 
 
 @st.cache_data
@@ -88,7 +106,7 @@ def show_source_fallback() -> None:
     st.caption("This fallback does not train ALS and does not claim personalized recommendations.")
 
 
-if not evaluation.exists() or not summary.exists():
+if not generated_outputs_ready():
     if DATASET.exists():
         show_source_fallback()
     else:

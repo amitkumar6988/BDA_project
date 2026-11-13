@@ -20,10 +20,27 @@ def train_als(train: DataFrame, config: ModelConfig):
 
 
 def recommendations_for_all(model, users: DataFrame, purchased: DataFrame, k: int = 10) -> DataFrame:
-    return model.recommendForAllUsers(k).select("user", F.posexplode("recommendations").alias("rank_zero", "rec")).select(
+    recommendations = model.recommendForAllUsers(k).select(
+        "user", F.posexplode("recommendations").alias("rank_zero", "rec")
+    ).select(
         "user", (F.col("rank_zero") + 1).alias("rank"), F.col("rec.item").alias("item"),
         F.col("rec.rating").alias("score")
-    ).join(purchased.select("user", "item").distinct(), ["user", "item"], "left_anti")
+    )
+    return rerank_unseen(recommendations, purchased, k)
+
+
+def rerank_unseen(recommendations: DataFrame, purchased: DataFrame, k: int = 10) -> DataFrame:
+    unseen = recommendations.join(
+        purchased.select("user", "item").distinct(), ["user", "item"], "left_anti"
+    )
+    return unseen.withColumn(
+        "rank",
+        F.row_number().over(
+            Window.partitionBy("user").orderBy(
+                F.col("rank"), F.col("score").desc(), F.col("item")
+            )
+        ),
+    ).filter(F.col("rank") <= k)
 
 
 def customer_recommendations(model, user_id: int, users: DataFrame, purchased: DataFrame, k: int = 10) -> DataFrame:

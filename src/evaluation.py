@@ -1,4 +1,23 @@
-from pyspark.sql import DataFrame, functions as F
+from pyspark.sql import DataFrame, Window, functions as F
+
+
+def temporal_train_test(interactions: DataFrame) -> tuple[DataFrame, DataFrame]:
+    ranked = interactions.withColumn(
+        "_holdout_rank",
+        F.row_number().over(
+            Window.partitionBy("user").orderBy(
+                F.col("last_purchase").desc(), F.col("item").desc()
+            )
+        ),
+    )
+    train = ranked.filter(F.col("_holdout_rank") > 1).drop("_holdout_rank")
+    eligible_users = train.select("user").distinct()
+    test = (
+        ranked.filter(F.col("_holdout_rank") == 1)
+        .join(eligible_users, "user", "left_semi")
+        .drop("_holdout_rank")
+    )
+    return train, test
 
 
 def ranking_metrics(recommendations: DataFrame, test: DataFrame, k: int = 10) -> dict[str, float]:

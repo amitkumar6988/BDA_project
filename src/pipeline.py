@@ -5,7 +5,7 @@ from .association_rules import product_associations
 from .config import DATASET, ModelConfig, PROCESSED_DIR, RECOMMENDATIONS_DIR, OUTPUT_DIR, ensure_directories
 from .data_cleaning import clean_transactions
 from .data_loader import load_transactions
-from .evaluation import ranking_metrics
+from .evaluation import ranking_metrics, temporal_train_test
 from .exploratory_analysis import summary
 from .feature_engineering import add_stable_ids, build_interactions
 from .recommendation_model import popularity, recommendations_for_all, train_als
@@ -22,12 +22,8 @@ def run(spark, dataset: Path = DATASET) -> dict:
     (OUTPUT_DIR / "summary.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     write_parquet(purchases, PROCESSED_DIR / "cleaned_purchases")
     write_parquet(interactions, PROCESSED_DIR / "interactions")
-    train_users = interactions.select("user").distinct()
-    max_date = interactions.agg(F.max("last_purchase")).first()[0]
-    train = interactions.filter(F.col("last_purchase") < F.lit(max_date)).unionByName(
-        interactions.filter(F.col("last_purchase") == F.lit(max_date)).limit(1)
-    )
-    test = interactions.subtract(train)
+    train, test = temporal_train_test(interactions)
+    train_users = train.select("user").distinct()
     config = ModelConfig()
     try:
         model = train_als(train, config)
