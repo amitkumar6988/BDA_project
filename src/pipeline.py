@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from pyspark.sql import functions as F
+from pyspark.sql import Window, functions as F
 from .association_rules import product_associations
 from .config import DATASET, ModelConfig, PROCESSED_DIR, RECOMMENDATIONS_DIR, OUTPUT_DIR, ensure_directories
 from .data_cleaning import clean_transactions
@@ -10,6 +10,20 @@ from .exploratory_analysis import summary
 from .feature_engineering import add_stable_ids, build_interactions
 from .recommendation_model import popularity, recommendations_for_all, train_als
 from .output_writer import write_parquet
+
+
+def temporal_train_test_split(interactions):
+    user_window = Window.partitionBy("user").orderBy(
+        F.col("last_purchase").desc(), F.col("item").desc()
+    )
+    ranked = interactions.withColumn("_user_interactions", F.count("*").over(Window.partitionBy("user"))).withColumn(
+        "_latest_rank", F.row_number().over(user_window)
+    )
+    test = ranked.filter(
+        (F.col("_user_interactions") > 1) & (F.col("_latest_rank") == 1)
+    ).select("user", "item")
+    train = interactions.join(test, ["user", "item"], "left_anti")
+    return train, interactions.join(test, ["user", "item"], "left_semi")
 
 
 def run(spark, dataset: Path = DATASET) -> dict:
@@ -23,11 +37,7 @@ def run(spark, dataset: Path = DATASET) -> dict:
     write_parquet(purchases, PROCESSED_DIR / "cleaned_purchases")
     write_parquet(interactions, PROCESSED_DIR / "interactions")
     train_users = interactions.select("user").distinct()
-    max_date = interactions.agg(F.max("last_purchase")).first()[0]
-    train = interactions.filter(F.col("last_purchase") < F.lit(max_date)).unionByName(
-        interactions.filter(F.col("last_purchase") == F.lit(max_date)).limit(1)
-    )
-    test = interactions.subtract(train)
+    train, test = temporal_train_test_split(interactions)
     config = ModelConfig()
     try:
         model = train_als(train, config)
@@ -37,8 +47,12 @@ def run(spark, dataset: Path = DATASET) -> dict:
     except ValueError as exc:
         recs = popularity(train, config.top_k).withColumn("user", F.lit(None).cast("int"))
         model_metrics = {"algorithm": "popularity fallback", "reason": str(exc)}
+    item_metadata = interactions.groupBy("item").agg(
+        F.first("stock_code").alias("stock_code"),
+        F.first("description", ignorenulls=True).alias("description"),
+    )
     write_parquet(
-        recs.join(interactions.select("item", "stock_code", "description").distinct(), "item", "left"),
+        recs.join(item_metadata, "item", "left"),
         RECOMMENDATIONS_DIR / "all_customers",
     )
     write_parquet(product_associations(purchases), PROCESSED_DIR / "product_associations")

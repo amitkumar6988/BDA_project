@@ -20,10 +20,23 @@ def train_als(train: DataFrame, config: ModelConfig):
 
 
 def recommendations_for_all(model, users: DataFrame, purchased: DataFrame, k: int = 10) -> DataFrame:
-    return model.recommendForAllUsers(k).select("user", F.posexplode("recommendations").alias("rank_zero", "rec")).select(
-        "user", (F.col("rank_zero") + 1).alias("rank"), F.col("rec.item").alias("item"),
+    item_count = purchased.select("item").distinct().count()
+    max_purchased = purchased.groupBy("user").count().agg(F.max("count")).first()[0] or 0
+    candidate_k = min(item_count, k + int(max_purchased))
+    candidates = model.recommendForAllUsers(candidate_k).select(
+        "user", F.posexplode("recommendations").alias("candidate_rank", "rec")
+    ).select(
+        "user", F.col("candidate_rank"), F.col("rec.item").alias("item"),
         F.col("rec.rating").alias("score")
-    ).join(purchased.select("user", "item").distinct(), ["user", "item"], "left_anti")
+    )
+    rank_window = Window.partitionBy("user").orderBy(
+        F.col("score").desc(), F.col("candidate_rank")
+    )
+    return candidates.join(
+        purchased.select("user", "item").distinct(), ["user", "item"], "left_anti"
+    ).withColumn("rank", F.row_number().over(rank_window)).filter(
+        F.col("rank") <= k
+    ).select("user", "rank", "item", "score")
 
 
 def customer_recommendations(model, user_id: int, users: DataFrame, purchased: DataFrame, k: int = 10) -> DataFrame:
